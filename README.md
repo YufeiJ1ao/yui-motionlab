@@ -159,10 +159,10 @@ numpy>=1.24.0
 pandas>=2.1.0
 scipy>=1.10.0
 ```
-```
+
 ## 🧾 CITATION.cff
 
-```yaml
+```bibtex
 cff-version: 1.2.0
 title: "Real-time Markerless Motion Capture: OAK-D to Blender Avatar"
 message: "If you use this software, please cite it as below."
