@@ -28,3 +28,65 @@ venv\Scripts\activate
 source venv/bin/activate
 
 pip install -r requirements.txt
+```
+### Option B: conda
+```bash
+conda env create -f environment.yml
+conda activate oakd_blender
+```
+
+## ▶️ Quick Start
+
+### 1 Run the OAK-D Sender
+```bash
+cd sender
+python oakd_sender.py --ip 127.0.0.1 --port 9000 --k 5 --alpha 0.2 \
+  --det 0.35 --track 0.35 --flip \
+  # optional toggles:
+  # --no-depth    # disable StereoDepth fallback to MP pseudo-3D
+  # --no-hands    # disable finger curls
+  # --no-head     # disable head YPR
+  # --no-expr     # disable facial expression metrics
+```
+### Common flags
+
+--k: median pooling radius for depth (patch size = 2k+1). Try 5 or 7 for smoother depth.
+
+--flip: mirror selfie-view.
+
+--alpha: OneEuro smoothing factor for pose vectors.
+
+### 2 Run the Blender Receiver
+1. Open your VRoid avatar .blend.
+
+2. Select the armature object (e.g., Armature) and switch to Pose Mode.
+
+3. Text Editor → open blender/blender_receiver.py → Run Script.
+
+4. Console should show:
+```csharp
+[Receiver] Listening UDP on 127.0.0.1:9000
+[Receiver] Timer registered @60.0Hz. Ready ✓
+```
+5. Move in front of camera — avatar follows.
+
+#### Notes
+
+If you see missing bones, update BONE_MAP and finger bone names in blender_receiver.py to match your rig.
+
+Port already in use? Change UDP_PORT in both sender and receiver to a free port.
+
+## 🧪 Latency Measurement
+
+1. Open your VRoid avatar .blend.
+
+2. Select the armature object (e.g., Armature) and switch to Pose Mode.
+
+3. Text Editor → open blender/blender_receiver.py → Run Script.
+
+4. Console should show:
+```csharp
+[Receiver] Listening UDP on 127.0.0.1:9000
+[Receiver] Timer registered @60.0Hz. Ready ✓
+```
+
