@@ -1,10 +1,10 @@
 # Real-time Markerless Motion Capture (OAK-D → Blender Avatar)
-![alt text](yuidrinktea.png)
+![alt text](Assets/yuidrinktea.png)
 A lightweight, real-time, **vision-based** motion capture pipeline that streams human motion from an **OAK-D S2** camera into a **VRoid/Blender** avatar.  
 Features: full-body pose (upper/lower body), **hand articulation** (finger curls), **head pose** (yaw/pitch/roll), **basic facial expressions**, and **stereo-depth fusion** for better front/back disambiguation. End-to-end latency is instrumented and reported.
 
 > Demo targets: interactive avatar control; future directions include **responsive AI avatars** and **humanoid robot** control.
-![alt text](yuiteapouring.png)
+![alt text](Assets/yuiteapouring.png)
 ---
 
 ## ✨ Features
@@ -14,7 +14,7 @@ Features: full-body pose (upper/lower body), **hand articulation** (finger curls
 - **Hands** (finger curls), **Head** (YPR), **Expressions** (blink, mouth open, smile, brow up).
 - **Latency measurement**: camera timestamp vs. Blender apply time, CSV export.
 - **Accessible**: consumer hardware + Python + Blender.
-![alt text](<Untitled diagram _ Mermaid Chart-2025-09-15-041633.png>)
+![alt text](<Assets/flowchart.png>)
 ---
 
 ## 📦 Installation
@@ -69,8 +69,8 @@ python oakd_sender.py --ip 127.0.0.1 --port 9000 --k 5 --alpha 0.2 \
 [Receiver] Timer registered @60.0Hz. Ready ✓
 ```
 5. Move in front of camera — avatar follows.
-![alt text](mocaphand.png)
-![alt text](mocaphand2.png)
+![alt text](Assets/mocaphand.png)
+![alt text](Assets/mocaphand2.png)
 #### Notes
 
 If you see missing bones, update BONE_MAP and finger bone names in blender_receiver.py to match your rig.
@@ -82,10 +82,10 @@ Port already in use? Change UDP_PORT in both sender and receiver to a free port.
 1. Open your VRoid avatar .blend.
 
 2. Select the armature object (e.g., Armature) and switch to Pose Mode.
-![alt text](pose_mode.png)
+![alt text](Assets/pose_mode.png)
 
 3. Text Editor → open blender/blender_receiver.py → Run Script.
-![alt text](runscript.png)
+![alt text](Assets/runscript.png)
 
 4. Console should show:
 ```csharp
