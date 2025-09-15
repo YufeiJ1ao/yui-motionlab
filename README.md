@@ -149,7 +149,7 @@ Hand axis wrong: swap finger bend axis e.x ⇄ e.y or flip sign in blender_recei
 # 📋 `requirements.txt`
 ```yaml
 
-```txt
+
 depthai>=2.24.0
 opencv-python>=4.8.0.76
 jupyterlab>=4.0.0
