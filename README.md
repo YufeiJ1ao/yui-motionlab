@@ -5,7 +5,7 @@ Features: full-body pose (upper/lower body), **hand articulation** (finger curls
 
 > Demo targets: interactive avatar control; future directions include **responsive AI avatars** and **humanoid robot** control.
 ![alt text](Assets/yuiteapouring.png)
-![alt text](Assets\yuiteadrinking.png)
+![alt text](Assets/yuiteadrinking.png)
 ---
 
 ## ✨ Features
