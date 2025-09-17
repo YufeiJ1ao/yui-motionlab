@@ -86,7 +86,7 @@ Port already in use? Change UDP_PORT in both sender and receiver to a free port.
 
 3. Text Editor → open blender/blender_receiver.py → Run Script.
 ![alt text](Assets/runscript.png)
-
+![alt text](Assets/BlenderScript.png)
 4. Console should show:
 ```csharp
 [Receiver] Listening UDP on 127.0.0.1:9000
