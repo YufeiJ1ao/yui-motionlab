@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+# Minimal OAK-D sender for event/intents only
+# - Uses MediaPipe Holistic (pose+hands)
+# - Detects: thumbs_up, gun, wave
+# - Maps to intents: clapping, dying, waving
+# - Sends UDP JSON: {t, seq, fps, detected, hands, events, intents}
+#
+# pip install depthai mediapipe opencv-python numpy
+
+import socket, json, time, sys, argparse, math, collections
+import numpy as np, cv2
+import depthai as dai
+import mediapipe as mp
+
+# ---------------------------- Args ----------------------------
+ap = argparse.ArgumentParser(description="OAK-D minimal event sender (thumbs_up/gun/wave)")
+ap.add_argument("--ip", default="127.0.0.1", help="receiver IP")
+ap.add_argument("--port", type=int, default=9001, help="receiver UDP port")
+ap.add_argument("--flip", action="store_true", help="mirror selfie view")
+ap.add_argument("--det", type=float, default=0.35, help="MP detection confidence")
+ap.add_argument("--track", type=float, default=0.35, help="MP tracking confidence")
+ap.add_argument("--cam-fps", type=int, default=30, help="camera FPS")
+args = ap.parse_args()
+UDP_ADDR = (args.ip, args.port)
+
+# ---------------------------- MediaPipe ----------------------------
+mp_hol = mp.solutions.holistic
+holistic = mp_hol.Holistic(
+    static_image_mode=False,
+    model_complexity=1,
+    smooth_landmarks=True,
+    refine_face_landmarks=False,      # not needed here
+    min_detection_confidence=args.det,
+    min_tracking_confidence=args.track
+)
+
+# Pose subset we rely on
+LANDMARKS = {
+    11:"shoulder_L", 12:"shoulder_R",
+    15:"wrist_L",    16:"wrist_R",
+}
+
+# Hand landmark index groups (MediaPipe Hands)
+FINGERS = {
+    "thumb":[1,2,3,4],
+    "index":[5,6,7,8],
+    "middle":[9,10,11,12],
+    "ring":[13,14,15,16],
+    "pinky":[17,18,19,20],
+}
+
+def finger_curl(hand_lms, finger):
+    """Return curl in [0..1]; 0=extended, 1=fully curled."""
+    idx = FINGERS[finger]
+    p1 = np.array([hand_lms[idx[0]].x, hand_lms[idx[0]].y, hand_lms[idx[0]].z], dtype=np.float32)
+    p2 = np.array([hand_lms[idx[1]].x, hand_lms[idx[1]].y, hand_lms[idx[1]].z], dtype=np.float32)
+    p3 = np.array([hand_lms[idx[2]].x, hand_lms[idx[2]].y, hand_lms[idx[2]].z], dtype=np.float32)
+    v1 = p2 - p1; v2 = p3 - p2
+    n1 = np.linalg.norm(v1) + 1e-6; n2 = np.linalg.norm(v2) + 1e-6
+    cosang = float(np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0))
+    ang_deg = math.degrees(math.acos(cosang))  # ~30° straight, ~150° curled
+    return float(np.clip((ang_deg - 30.0) / (150.0 - 30.0), 0.0, 1.0))
+
+# ---------------------------- Event Detector ----------------------------
+# ---------------------------- Event Detector ----------------------------
+class EventDetector:
+    """
+    Rule-based detector on 2D normalized pose + hand curls.
+    Emits events: 'thumbs_up', 'gun', 'wave'.
+    - thumbs_up / gun: rising-edge (state change) -> fire once when pose becomes true
+    - wave: debounced by cooldown + peak counting
+    """
+    def __init__(self):
+        self.hist_sec = 1.5
+        self.wrist_rx = collections.deque()  # (t, x) for right wrist
+        self.last_emit = {}                  # for wave cooldown only
+
+        # thresholds
+        self.wave_min_span_rel = 0.22  # wrist X span >= 0.22 * shoulder_width
+        self.wave_min_peaks    = 2
+        self.wave_height_guard = -0.02 # wrist y must be at least 0.02 above shoulder (y smaller = higher)
+        self.thumb_lo  = 0.30          # thumb curl < 0.30 -> extended
+        self.index_lo  = 0.30          # index curl < 0.30 -> extended (for gun)
+        self.finger_hi = 0.70          # other fingers curl > 0.70 -> folded
+        self.cooldown  = {"wave":0.9}  # wave uses cooldown; others use rising-edge
+
+        # rising-edge state
+        self.state = {"thumbs_up": False, "gun": False}
+
+    def _now(self): 
+        return time.time()
+
+    def _debounced(self, name):
+        t = self._now()
+        if t - self.last_emit.get(name, 0.0) >= self.cooldown[name]:
+            self.last_emit[name] = t
+            return True
+        return False
+
+    def _prune(self, dq):
+        t_now = self._now()
+        while dq and (t_now - dq[0][0]) > self.hist_sec:
+            dq.popleft()
+
+    @staticmethod
+    def _count_peaks(xs):
+        if len(xs) < 5: return 0
+        v = np.diff(xs)
+        thr = (np.max(np.abs(v)) * 0.2) if np.max(np.abs(v)) > 1e-6 else 0.0
+        v[np.abs(v) < thr] = 0.0
+        s = np.sign(v)
+        s = s[s != 0]
+        if s.size == 0: return 0
+        return int(np.sum(s[1:] * s[:-1] < 0))
+
+    def update(self, pose2d, hands):
+        """
+        pose2d: dict name -> (x,y) in [0..1]
+        hands : {"L":{finger:curl}, "R":{...}} with curl in [0..1]
+        """
+        events = []
+
+        # Shoulder width as scale
+        if ("shoulder_L" in pose2d) and ("shoulder_R" in pose2d):
+            shoulder_w = abs(pose2d["shoulder_R"][0] - pose2d["shoulder_L"][0])
+        else:
+            shoulder_w = 0.25
+
+        # -------- Wave (right hand) --------
+        if ("wrist_R" in pose2d) and ("shoulder_R" in pose2d):
+            wr = pose2d["wrist_R"]; sr = pose2d["shoulder_R"]
+            self.wrist_rx.append((self._now(), float(wr[0] - sr[0])))
+            self._prune(self.wrist_rx)
+            high_enough = (wr[1] - sr[1]) <= self.wave_height_guard  # y smaller => higher
+            if high_enough and len(self.wrist_rx) >= 8:
+                xs = np.array([x for _, x in self.wrist_rx])
+                span = float(xs.max() - xs.min())
+                peaks = self._count_peaks(xs)
+                if (span >= self.wave_min_span_rel * shoulder_w) and (peaks >= self.wave_min_peaks):
+                    if self._debounced("wave"):
+                        events.append("wave")
+                        self.wrist_rx.clear()
+
+        RH = hands.get("R", {})
+        LH = hands.get("L", {})
+
+        def is_thumbsup(H):
+            return (
+                H.get("thumb",1.0) < self.thumb_lo and
+                H.get("index",0.0) > self.finger_hi and
+                H.get("middle",0.0) > self.finger_hi and
+                H.get("ring",0.0) > self.finger_hi and
+                H.get("pinky",0.0) > self.finger_hi
+            )
+
+        def is_gun(H):
+            return (
+                H.get("thumb",1.0) < self.thumb_lo and
+                H.get("index",1.0) < self.index_lo and
+                H.get("middle",0.0) > self.finger_hi and
+                H.get("ring",0.0) > self.finger_hi and
+                H.get("pinky",0.0) > self.finger_hi
+            )
+
+        # -------- Thumbs-up (rising-edge) --------
+        tu_now = (RH and is_thumbsup(RH)) or (LH and is_thumbsup(LH))
+        if tu_now and not self.state["thumbs_up"]:
+            events.append("thumbs_up")
+        self.state["thumbs_up"] = tu_now
+
+        # -------- Gun (rising-edge) --------
+        gn_now = (RH and is_gun(RH)) or (LH and is_gun(LH))
+        if gn_now and not self.state["gun"]:
+            events.append("gun")
+        self.state["gun"] = gn_now
+
+        return events
+event_detector = EventDetector()
+
+# ---------------------------- OAK-D pipeline ----------------------------
+def build_pipeline():
+    p = dai.Pipeline()
+    cam = p.create(dai.node.ColorCamera)
+    cam.setBoardSocket(dai.CameraBoardSocket.RGB)
+    cam.setResolution(dai.ColorCameraProperties.SensorResolution.THE_720_P)
+    cam.setFps(args.cam_fps)
+    cam.setInterleaved(False)
+    cam.setColorOrder(dai.ColorCameraProperties.ColorOrder.BGR)
+    cam.setVideoSize(1280, 720)
+    xrgb = p.create(dai.node.XLinkOut)
+    xrgb.setStreamName("video")
+    cam.video.link(xrgb.input)
+    return p
+
+# ---------------------------- Helpers (draw HUD) ----------------------------
+def draw_hands_overlay(frame, res):
+    if res.left_hand_landmarks:
+        _draw_one_hand(frame, res.left_hand_landmarks, (255,180,60))
+    if res.right_hand_landmarks:
+        _draw_one_hand(frame, res.right_hand_landmarks, (60,200,255))
+
+HAND_CHAINS = [(0,1,2,3,4),(0,5,6,7,8),(0,9,10,11,12),(0,13,14,15,16),(0,17,18,19,20)]
+def _draw_one_hand(frame, hand_lms, color):
+    h, w = frame.shape[:2]
+    pts = []
+    for lm in hand_lms.landmark:
+        u = int(np.clip(lm.x * w, 0, w-1)); v = int(np.clip(lm.y * h, 0, h-1))
+        pts.append((u, v))
+    for chain in HAND_CHAINS:
+        for a,b in zip(chain[:-1], chain[1:]):
+            cv2.line(frame, pts[a], pts[b], color, 2, cv2.LINE_AA)
+    for (u,v) in pts:
+        cv2.circle(frame, (u,v), 3, color, -1, lineType=cv2.LINE_AA)
+
+# ---------------------------- Main loop ----------------------------
+def main():
+    if not dai.Device.getAllAvailableDevices():
+        print("No OAK-D found. Use USB3 cable/port.", file=sys.stderr); return
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    pipe = build_pipeline()
+    fps, n, t0 = 0.0, 0, time.time()
+    last_frame = None
+    seq = 0
+
+    with dai.Device(pipe) as device:
+        q_rgb = device.getOutputQueue("video", maxSize=4, blocking=False)
+
+        while True:
+            pkt = q_rgb.tryGet()
+            if pkt is not None:
+                last_frame = pkt.getCvFrame()
+
+            if last_frame is None:
+                if (cv2.waitKey(1)&0xFF) in (27, ord('q'), ord('Q')): break
+                time.sleep(0.005); continue
+
+            frame = last_frame.copy()
+            if args.flip: frame = cv2.flip(frame, 1)
+            h, w = frame.shape[:2]
+
+            res = holistic.process(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+
+            detected = res.pose_landmarks is not None
+            pose2d = {}
+            if detected:
+                lm = res.pose_landmarks.landmark
+                for idx, name in LANDMARKS.items():
+                    p = lm[idx]
+                    pose2d[name] = (float(p.x), float(p.y))  # normalized 0..1
+
+            # hands curls (both sides)
+            hands = {"L":{}, "R":{}}
+            if res.left_hand_landmarks:
+                lms = res.left_hand_landmarks.landmark
+                for f in FINGERS.keys():
+                    hands["L"][f] = finger_curl(lms, f)
+            if res.right_hand_landmarks:
+                lms = res.right_hand_landmarks.landmark
+                for f in FINGERS.keys():
+                    hands["R"][f] = finger_curl(lms, f)
+
+            # events + intents mapping
+            events = event_detector.update(pose2d, hands)
+            intent_map = {"thumbs_up": "clap","gun":       "die","wave":      "wave",}
+
+            intents = [intent_map[e] for e in events if e in intent_map]
+
+            # payload (event-focused, minimal)
+            payload = {
+                "t": time.time(),
+                "seq": int(seq),
+                "fps": float(fps),
+                "detected": bool(detected),
+                "hands": hands,
+                "events": events,
+                "intents": intents
+            }
+            seq += 1
+
+            # send UDP
+            try:
+                sock.sendto(json.dumps(payload).encode("utf-8"), UDP_ADDR)
+            except Exception as e:
+                print("UDP send error:", e, file=sys.stderr)
+
+            # HUD
+            n += 1
+            if n % 10 == 0:
+                t1 = time.time(); fps = 10.0 / max(1e-3, (t1 - t0)); t0 = t1
+            cv2.putText(frame, f"EVT: {','.join(events) if events else '-'}  | INT: {','.join(intents) if intents else '-'}",
+                        (8, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (50,255,180), 2, cv2.LINE_AA)
+            draw_hands_overlay(frame, res)
+            cv2.imshow("OAK-D Minimal Event Sender", frame)
+
+            if (cv2.waitKey(1) & 0xFF) in (27, ord('q'), ord('Q')): break
+            time.sleep(0.002)
+
+    cv2.destroyAllWindows()
+
+if __name__ == "__main__":
+    main()
