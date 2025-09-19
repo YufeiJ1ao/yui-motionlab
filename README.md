@@ -6,7 +6,6 @@ Features: full-body pose (upper/lower body), **hand articulation** (finger curls
 > Demo targets: interactive avatar control; future directions include **responsive AI avatars** and **humanoid robot** control.
 ![AvatarYui pouring tea](Assets/yuiteapouring.png)
 ![AvatarYui drinking tea](Assets/yuiteadrinking.png)
-![AvatarYui wave at user](avatarAssets/wave.gif)
 ![AvatarYui play dead as handgun pointing](avatarAssets/play.gif)
 ---
 
