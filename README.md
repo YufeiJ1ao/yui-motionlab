@@ -4,8 +4,10 @@ A lightweight, real-time, **vision-based** motion capture pipeline that streams 
 Features: full-body pose (upper/lower body), **hand articulation** (finger curls), **head pose** (yaw/pitch/roll), **basic facial expressions**, and **stereo-depth fusion** for better front/back disambiguation. End-to-end latency is instrumented and reported.
 
 > Demo targets: interactive avatar control; future directions include **responsive AI avatars** and **humanoid robot** control.
-![alt text](Assets/yuiteapouring.png)
-![alt text](Assets/yuiteadrinking.png)
+![AvatarYui pouring tea](Assets/yuiteapouring.png)
+![AvatarYui drinking tea](Assets/yuiteadrinking.png)
+![AvatarYui wave at user](avatarAssets/wave.gif)
+![AvatarYui play dead as handgun pointing](avatarAssets/play.gif)
 ---
 
 ## ✨ Features
@@ -168,10 +170,12 @@ cff-version: 1.2.0
 title: "Real-time Markerless Motion Capture: OAK-D to Blender Avatar"
 message: "If you use this software, please cite it as below."
 authors:
-  - family-names: "<Yufei>"
-    given-names: "<Jiao>"
-    orcid: "https://orcid.org/XXXXXXXXXXXXXXX"   # optional
+  - family-names: "<Jiao>"
+    given-names: "<Yufei>"
+    
 version: "0.1.0"
 date-released: "2025-09-15"
-url: "https://github.com/<your-username>/<your-repo>"
+url: "https://github.com/YufeiJ1ao/yui-motionlab"
 ```
+---
+“The data used in this project was obtained from mocap.cs.cmu.edu. The database was created with funding from NSF EIA-0196217.”
